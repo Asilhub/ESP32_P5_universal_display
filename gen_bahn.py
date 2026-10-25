@@ -1,4 +1,5 @@
-"""Bahnschrift Bold Condensed dan font_bahn.h yasaydi (24 / 20 / 15 px bosh harf, ikki panel uchun).
+"""Bahnschrift Bold Condensed dan font_bahn.h yasaydi (24 / 20 / 15 px bosh harf - ikki panel uchun,
+12 / 7 px - parkovka rejimida avtoraqam va kichik yozuvlar uchun).
 Ishlatish: python gen_bahn.py  (Windows, Pillow kerak)"""
 from PIL import Image, ImageDraw, ImageFont
 
@@ -8,7 +9,7 @@ import os
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "font_bahn.h")
 
 CHARS = (
-    [ord(c) for c in "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ:-.,$%+/="]
+    [ord(c) for c in "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ:-.,$%+/='"]
     + [0x401] + list(range(0x410, 0x430))          # Ё, А..Я
     + [0x4A2, 0x4AE, 0x4E8]                         # Ң, Ү, Ө
 )
@@ -43,7 +44,7 @@ def make(cap):
 
 out = ["// Avtomatik yasalgan: Bahnschrift Bold Condensed (Windows shrifti) -> piksel shrift.",
        "// Qayta yasash: gen_bahn.py. Qo'lda o'zgartirmang.",
-       "// Belgilar: 0-9 A-Z : - . , $ % + / =",
+       "// Belgilar: 0-9 A-Z : - . , $ % + / = '",
        "// hamda kirill А-Я, Ё, Ң, Ү, Ө. Har bir qator: bit (w-1-ustun) = piksel.",
        "#pragma once", "#include <Arduino.h>", "",
        "struct BahnFont {",
@@ -55,7 +56,7 @@ out = ["// Avtomatik yasalgan: Bahnschrift Bold Condensed (Windows shrifti) -> p
        "  const uint8_t  *widths;   // har bir belgi eni",
        "  const uint32_t *bits;     // count * rows ta qator",
        "};", ""]
-for cap in (24, 20, 15):
+for cap in (24, 20, 15, 12, 7):
     g, rows, cap_top = make(cap)
     widths = [len(g[c][0]) for c in CHARS]
     assert max(widths) <= 32

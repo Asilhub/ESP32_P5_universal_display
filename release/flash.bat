@@ -10,7 +10,7 @@ set PORT=%1
 if "%PORT%"=="" set PORT=COM3
 
 echo.
-echo  P5 Carwash Display universal v1.0.0 (16S / 8S / ustma-ust)
+echo  P5 Carwash Display universal v1.1.0 (16S / 8S / ustma-ust, parkovka)
 echo  Port: %PORT%
 echo.
 
@@ -39,7 +39,7 @@ echo    - 0x1000  : bootloader.bin
 echo    - 0x8000  : partitions.bin
 echo    - 0xe000  : boot_app0.bin
 echo    - 0x10000 : firmware.bin
-echo  Yoki bitta fayl: p5_carwash_v1.0.0_FULL.bin -^> 0x0
+echo  Yoki bitta fayl: p5_carwash_v1.1.0_FULL.bin -^> 0x0
 echo.
 pause
 exit /b 1
