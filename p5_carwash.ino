@@ -187,11 +187,20 @@ public:
 Screen disp;
 
 char message[128]    = "MECANUZ";
+char message2[128]   = "";        // LINES rejimida pastki qator matni
 char timeStr[6]      = "00:00";
 char currencyStr[32] = "";
 
 int   value          = 0;
 int   xPos           = 0;
+int   xPos2          = 0;         // pastki qator skrolli (LINES, PARKING)
+
+// PARKING rejimi: tepada avtoraqam, pastda summa (yoki message2 dagi matn)
+char  plateRegion[3] = "";        // "01" - viloyat kodi
+char  plateMain[24]  = "";        // "A 123 BC" - guruhlar orasida bo'sh joy
+bool  plateKG        = false;     // Qirg'iziston raqami: bayroq va KG, valyuta СОМ
+long  parkSum        = 0;
+char  parkLabel[16]  = "";        // summa ostidagi valyuta: SO'M / СОМ
 
 uint16_t textColor   = 0xFFFF;
 uint16_t valueColor  = 0xFFFF;
@@ -290,13 +299,15 @@ int glyphIndex(const BahnFont &f, uint16_t code) {
 
 int spaceWidth(const BahnFont &f) { return f.cap / 3; }
 
-int textWidth(const BahnFont &f, const char *str) {
+// space - bo'sh joy eni (berilmasa shriftga qarab); so'zlar orasida space + 1 px qoladi
+int textWidth(const BahnFont &f, const char *str, int space = -1) {
+  if (space < 0) space = spaceWidth(f);
   int width = 0;
   const char *ptr = str;
   while (*ptr) {
     uint16_t code = nextUTF8(ptr);
     if (code == 0) break;
-    if (code == ' ') { width += spaceWidth(f); continue; }
+    if (code == ' ') { width += space; continue; }
     int i = glyphIndex(f, code);
     if (i >= 0) width += pgm_read_byte(&f.widths[i]) + 1;
   }
@@ -304,12 +315,13 @@ int textWidth(const BahnFont &f, const char *str) {
 }
 
 // y - bosh harfning yuqori chizig'i
-void drawText(const BahnFont &f, int16_t x, int16_t y, const char *str, uint16_t color) {
+void drawText(const BahnFont &f, int16_t x, int16_t y, const char *str, uint16_t color, int space = -1) {
+  if (space < 0) space = spaceWidth(f);
   const char *ptr = str;
   while (*ptr) {
     uint16_t code = nextUTF8(ptr);
     if (code == 0) break;
-    if (code == ' ') { x += spaceWidth(f); continue; }
+    if (code == ' ') { x += space; continue; }
     int i = glyphIndex(f, code);
     if (i < 0) continue;
 
@@ -430,15 +442,18 @@ void drawText16(int16_t x, int16_t y, const char *str, uint16_t color) {
 enum LineSlot { SLOT_SINGLE, SLOT_TOP, SLOT_BOTTOM };
 
 // Matnni o'z joyiga chizadi va kengligini qaytaradi. 64 px dan keng matn
-// (yoki scroll=true bo'lsa) xPos dan boshlab chiziladi - skrollni loop() qiladi.
+// (yoki scroll=true bo'lsa) xPos dan (pastki qator - xPos2 dan) boshlab
+// chiziladi - skrollni loop() qiladi.
 // font berilmasa - matnga sig'adigan eng kattasi tanlanadi.
 int drawLine(LineSlot slot, const char *text, uint16_t color, bool scroll = false,
              const BahnFont *font = nullptr) {
+  int pos = (slot == SLOT_BOTTOM) ? xPos2 : xPos;
+
   if (disp.count == 1) {
     // 64x32: bitta qatorli matn 8-qatordan, ikki qatorli 1..14 va 17..30 qatorlarda
     int w = textWidth16(text);
     int16_t y = (slot == SLOT_SINGLE) ? 8 : (slot == SLOT_TOP) ? 1 : 17;
-    int16_t x = (scroll || w > PANEL_WIDTH) ? xPos : (PANEL_WIDTH - w) / 2;
+    int16_t x = (scroll || w > PANEL_WIDTH) ? pos : (PANEL_WIDTH - w) / 2;
     drawText16(x, y, text, color);
     return w;
   }
@@ -454,9 +469,161 @@ int drawLine(LineSlot slot, const char *text, uint16_t color, bool scroll = fals
     y = (slot == SLOT_TOP) ? top : disp.height - top - f.cap;   // pastkisi - ko'zgu
   }
 
-  int16_t x = (scroll || w > PANEL_WIDTH) ? xPos : (PANEL_WIDTH - w) / 2;
+  int16_t x = (scroll || w > PANEL_WIDTH) ? pos : (PANEL_WIDTH - w) / 2;
   drawText(f, x, y, text, color);
   return w;
+}
+
+// Uzun matn uzluksiz skroll qiladi: to'liq chiqib ketgach, yana o'ng tarafdan kiradi
+void scrollStep(int &pos, int w) {
+  if (w <= PANEL_WIDTH) return;
+  pos--;
+  if (pos < -w) pos = PANEL_WIDTH;
+}
+
+// ---------- Parkovka ----------
+// Avtoraqam haqiqiy raqamga o'xshab chiziladi (ramka ichida, 12 px):
+//   | 01 | A 123 BC  ▤ |    ▤ - bayroq, ostida U/Z (yoki K/G) 3x5 harflar
+// O'zbekiston: "01 A 123 BC" (jismoniy), "01 123 ABC" (yuridik). Qirg'iziston: "01 123 ABC".
+// Sig'masa avval guruhlar orasi qisqaradi, keyin bayroq olib tashlanadi;
+// baribir sig'masa (yoki raqam 2 ta raqamdan boshlanmasa) - oddiy matn bo'lib skroll qiladi.
+
+static const uint8_t MICRO_UZ[2][5] = { {5, 5, 5, 5, 7}, {7, 1, 2, 4, 7} };   // U Z
+static const uint8_t MICRO_KG[2][5] = { {5, 5, 6, 5, 5}, {7, 4, 5, 5, 7} };   // K G
+
+void drawMicro(int16_t x, int16_t y, const uint8_t *rows, uint16_t color) {
+  for (int r = 0; r < 5; r++) {
+    for (int c = 0; c < 3; c++) {
+      if (rows[r] & (4 >> c)) disp.drawPixel(x + c, y + r, color);
+    }
+  }
+}
+
+// 3x6 bayroq: UZ - ko'k/oq/yashil, KG - qizil, o'rtasida sariq quyosh
+void drawFlag(int16_t x, int16_t y) {
+  for (int r = 0; r < 6; r++) {
+    for (int c = 0; c < 3; c++) {
+      uint16_t col;
+      if (plateKG) {
+        col = (c == 1 && (r == 2 || r == 3)) ? disp.color444(15, 12, 0) : disp.color444(15, 1, 1);
+      } else {
+        col = (r < 2) ? disp.color444(0, 6, 15) : (r < 4) ? disp.color444(15, 15, 15) : disp.color444(0, 12, 4);
+      }
+      disp.drawPixel(x + c, y + r, col);
+    }
+  }
+}
+
+// Ramka y0..y1 qatorlarda. Chizib bo'lmasa false.
+bool drawPlate(int16_t y0, int16_t y1, uint16_t color) {
+  if (!plateRegion[0] || !plateMain[0]) return false;
+
+  const BahnFont &f = bahn12;
+  static const struct { uint8_t gap; bool flag; } FITS[] = {
+    {3, true}, {2, true}, {3, false}, {2, false}, {1, false}
+  };
+  int rw = textWidth(f, plateRegion);
+  int gap = 0, mw = 0;
+  bool flag = false;
+  for (const auto &fit : FITS) {
+    int w = textWidth(f, plateMain, fit.gap - 1);
+    // ramka+bo'shliq, region, bo'shliq+chiziq+bo'shliq, asosiy, bo'shliq, bayroq+bo'shliq, ramka
+    if (2 + rw + 3 + w + 1 + (fit.flag ? 4 : 0) + 1 <= PANEL_WIDTH) {
+      gap = fit.gap; flag = fit.flag; mw = w;
+      break;
+    }
+  }
+  if (!gap) return false;
+
+  // Ramka, burchaklari yumaloq
+  for (int16_t x = 1; x < PANEL_WIDTH - 1; x++) {
+    disp.drawPixel(x, y0, color);
+    disp.drawPixel(x, y1, color);
+  }
+  for (int16_t y = y0 + 1; y < y1; y++) {
+    disp.drawPixel(0, y, color);
+    disp.drawPixel(PANEL_WIDTH - 1, y, color);
+  }
+
+  int16_t inner = y1 - y0 - 1;
+  int16_t ty = y0 + 1 + (inner - f.cap) / 2;
+  drawText(f, 2, ty, plateRegion, color);
+
+  int16_t dx = 2 + rw + 1;                       // region ajratuvchisi
+  for (int16_t y = y0 + 1; y < y1; y++) disp.drawPixel(dx, y, color);
+
+  int16_t fx  = PANEL_WIDTH - 5;                 // bayroq ustuni (3 px)
+  int16_t mx0 = dx + 2;
+  int16_t mx1 = flag ? fx - 1 : PANEL_WIDTH - 2;
+  drawText(f, mx0 + (mx1 - mx0 - mw) / 2, ty, plateMain, color, gap - 1);
+
+  if (flag) {
+    bool letters = inner >= 18;                  // bitta panelda faqat bayroq sig'adi
+    int16_t fy = y0 + 1 + (inner - (letters ? 18 : 6)) / 2;
+    drawFlag(fx, fy);
+    if (letters) {
+      const uint8_t (*m)[5] = plateKG ? MICRO_KG : MICRO_UZ;
+      drawMicro(fx, fy + 7,  m[0], color);
+      drawMicro(fx, fy + 13, m[1], color);
+    }
+  }
+  return true;
+}
+
+// 1500000 -> "1 500 000"
+void formatAmount(long v, char *out, size_t size) {
+  char digits[16];
+  snprintf(digits, sizeof(digits), "%ld", v < 0 ? -v : v);
+  size_t n = strlen(digits), j = 0;
+  if (v < 0 && j < size - 1) out[j++] = '-';
+  for (size_t i = 0; i < n && j < size - 1; i++) {
+    if (i > 0 && (n - i) % 3 == 0 && j < size - 2) out[j++] = ' ';
+    out[j++] = digits[i];
+  }
+  out[j] = '\0';
+}
+
+// Ikki panel: pastki panelda katta summa, ostida valyuta.
+// Bitta panel: pastki yarmida summa va valyuta bir qatorda.
+void drawAmount() {
+  char num[20];
+  formatAmount(parkSum, num, sizeof(num));
+  const BahnFont &lf = bahn7;
+  int lw = textWidth(lf, parkLabel);
+  uint16_t labelColor = disp.color444(12, 12, 12);
+
+  if (disp.count == 1) {
+    const BahnFont &f = bahn12;
+    int w = textWidth(f, num, 2);
+    bool label = w + 3 + lw <= PANEL_WIDTH;
+    int16_t x = (PANEL_WIDTH - (label ? w + 3 + lw : w)) / 2;
+    drawText(f, x, 18, num, valueColor, 2);
+    if (label) drawText(lf, x + w + 3, 18 + f.cap - lf.cap, parkLabel, labelColor);
+    return;
+  }
+
+  static const BahnFont *const SUM_FONTS[] = { &bahn20, &bahn15, &bahn12 };
+  const BahnFont *f = SUM_FONTS[2];
+  for (const BahnFont *s : SUM_FONTS) {
+    if (textWidth(*s, num, 3) <= PANEL_WIDTH - 2) { f = s; break; }
+  }
+  int w = textWidth(*f, num, 3);
+  int16_t h = f->cap + 3 + lf.cap;
+  int16_t y = PANEL_HEIGHT + 1 + (PANEL_HEIGHT - 1 - h) / 2;
+  drawText(*f, (PANEL_WIDTH - w) / 2, y, num, valueColor, 3);
+  drawText(lf, (PANEL_WIDTH - lw) / 2, y + f->cap + 3, parkLabel, labelColor);
+}
+
+void drawParking() {
+  bool two = disp.count > 1;
+  if (!drawPlate(two ? 4 : 0, two ? PANEL_HEIGHT - 5 : PANEL_HEIGHT / 2 - 1, textColor)) {
+    scrollStep(xPos, drawLine(SLOT_TOP, message, textColor));
+  }
+  if (message2[0]) {
+    scrollStep(xPos2, drawLine(SLOT_BOTTOM, message2, valueColor));
+  } else {
+    drawAmount();
+  }
 }
 
 // ---------- Yordamchi funksiyalar ----------
@@ -658,6 +825,137 @@ void savePanelConfig(const char *panels, const char *input, const char *flip) {
 
 // ---------- JSON ----------
 
+// Kirill rejimida harfma-harf o'girib bo'lmaydigan so'zlar (SH -> Ш va h.k.)
+const char *cyrillicWord(const String &word) {
+  if (word == "SHAMPUN") return "ШАМПУНЬ";
+  if (word == "PAUZA")   return "ПАУЗА";
+  return nullptr;
+}
+
+// "top" / "bottom" qatori: topkr, topkg (kirill), topuz yoki top (lotin) kalitidan
+// matnni out ga yozadi. Kalit topilmasa out bo'sh qoladi.
+void lineText(JsonDocument &doc, const char *base, char *out, size_t size, bool cyr) {
+  static const char *const SUFFIX[] = { "kr", "kg", "uz", "" };
+  char key[16];
+  for (const char *suffix : SUFFIX) {
+    snprintf(key, sizeof(key), "%s%s", base, suffix);
+    if (!doc[key].is<const char*>()) continue;
+
+    String text = doc[key].as<const char*>();
+    text.toUpperCase();
+    const char *word = cyr ? cyrillicWord(text) : nullptr;
+    strncpy(out, word ? word : text.c_str(), size - 1);
+    out[size - 1] = '\0';
+    return;
+  }
+}
+
+// {"top":"SHAMPUN","bottom":"KOPIK"} - tepa va pastki qatorga alohida matn.
+// Ikki panelda - har bir panelga bittadan, bitta panelda - ikki qator.
+// Kalitlardan biri yuborilmasa - o'sha qator bo'sh qoladi.
+// Kirill kaliti (topkg, bottomkr, ...) bittasida bo'lsa ham ikkala qator kirillga o'tadi.
+void showLines(JsonDocument &doc) {
+  bool cyr = false;
+  for (const char *key : { "topkr", "topkg", "bottomkr", "bottomkg" }) {
+    if (doc[key].is<const char*>()) cyr = true;
+  }
+
+  char top[128] = "", bottom[128] = "";
+  lineText(doc, "top", top, sizeof(top), cyr);
+  lineText(doc, "bottom", bottom, sizeof(bottom), cyr);
+
+  int r1 = doc["colorR1"] | 255;
+  int g1 = doc["colorG1"] | 255;
+  int b1 = doc["colorB1"] | 255;
+  int r2 = doc["colorR2"] | 255;
+  int g2 = doc["colorG2"] | 255;
+  int b2 = doc["colorB2"] | 255;
+
+  isCyrillic     = cyr;
+  textColor      = disp.color444(r1 / 17, g1 / 17, b1 / 17);
+  valueColor     = disp.color444(r2 / 17, g2 / 17, b2 / 17);
+  displayType    = "LINES";
+  valueZeroSince = 0;
+
+  // Qator o'zgarganda o'sha qatorning skrolli chap chetdan boshlanadi
+  if (strcmp(message, top) != 0) {
+    strcpy(message, top);
+    xPos = 0;
+  }
+  if (strcmp(message2, bottom) != 0) {
+    strcpy(message2, bottom);
+    xPos2 = 0;
+  }
+}
+
+// {"plate":"01A123BC","sum":15000} - parkovka: tepada avtoraqam, pastda summa.
+// "platekg" - Qirg'iziston raqami. "text" berilsa summa o'rniga shu matn chiqadi,
+// "currency" - summa ostidagi yozuv (standart SO'M / СОМ).
+void showParking(JsonDocument &doc) {
+  plateKG = doc["platekg"].is<const char*>();
+  const char *raw = plateKG ? doc["platekg"] : doc["plate"];
+
+  // Faqat harf va raqamlar, katta harf bilan: "01 a-123 bc" -> "01A123BC"
+  char clean[16];
+  size_t n = 0;
+  for (; *raw && n < sizeof(clean) - 1; raw++) {
+    if (isalnum((unsigned char)*raw)) clean[n++] = toupper((unsigned char)*raw);
+  }
+  clean[n] = '\0';
+
+  // Viloyat kodi - boshidagi 2 ta raqam; qolgani harf/raqam guruhlariga bo'linadi
+  bool region = n > 2 && isdigit((unsigned char)clean[0]) && isdigit((unsigned char)clean[1]);
+  plateRegion[0] = '\0';
+  if (region) {
+    memcpy(plateRegion, clean, 2);
+    plateRegion[2] = '\0';
+  }
+  size_t j = 0;
+  for (size_t i = region ? 2 : 0; i < n && j < sizeof(plateMain) - 2; i++) {
+    if (j > 0 && !!isdigit((unsigned char)clean[i]) != !!isdigit((unsigned char)clean[i - 1])) {
+      plateMain[j++] = ' ';
+    }
+    plateMain[j++] = clean[i];
+  }
+  plateMain[j] = '\0';
+
+  // Ramkaga sig'masa oddiy matn: "01 A 123 BC"
+  char plain[sizeof(message)];
+  snprintf(plain, sizeof(plain), "%s%s%s", plateRegion, region ? " " : "", plateMain);
+
+  String text = doc["text"] | "";
+  text.toUpperCase();
+  String label = doc["currency"] | (plateKG ? "СОМ" : "SO'M");
+  label.toUpperCase();
+
+  parkSum = doc["sum"] | 0L;
+  strncpy(parkLabel, label.c_str(), sizeof(parkLabel) - 1);
+  parkLabel[sizeof(parkLabel) - 1] = '\0';
+
+  int r1 = doc["colorR1"] | 255;
+  int g1 = doc["colorG1"] | 255;
+  int b1 = doc["colorB1"] | 255;
+  int r2 = doc["colorR2"] | 0;       // summa standart - yashil
+  int g2 = doc["colorG2"] | 255;
+  int b2 = doc["colorB2"] | 80;
+
+  isCyrillic     = false;            // raqamdagi lotin harflar kirillga o'girilmasin
+  textColor      = disp.color444(r1 / 17, g1 / 17, b1 / 17);
+  valueColor     = disp.color444(r2 / 17, g2 / 17, b2 / 17);
+  displayType    = "PARKING";
+  valueZeroSince = 0;
+
+  if (strcmp(message, plain) != 0) {
+    strcpy(message, plain);
+    xPos = 0;
+  }
+  if (strcmp(message2, text.c_str()) != 0) {
+    strncpy(message2, text.c_str(), sizeof(message2) - 1);
+    message2[sizeof(message2) - 1] = '\0';
+    xPos2 = 0;
+  }
+}
+
 void parseJSON(String jsonStr) {
 #if ARDUINOJSON_VERSION_MAJOR >= 7
   JsonDocument doc;
@@ -687,6 +985,16 @@ void parseJSON(String jsonStr) {
   if (doc["brightness"].is<int>()) {
     saveBrightness(doc["brightness"]);
     return;
+  }
+  if (doc["plate"].is<const char*>() || doc["platekg"].is<const char*>()) {
+    showParking(doc);
+    return;
+  }
+  for (const char *key : { "top", "topkr", "topkg", "topuz", "bottom", "bottomkr", "bottomkg", "bottomuz" }) {
+    if (doc[key].is<const char*>()) {
+      showLines(doc);
+      return;
+    }
   }
 
   // Tilni aniqlash (kirill/lotin kalitlari orqali)
@@ -776,15 +1084,8 @@ void parseJSON(String jsonStr) {
     newDisplayType = "TEXT";
 
     // Kirill tili uchun sozlar tarjimasi
-    if (isCyrillic && typeStr == "SHAMPUN") {
-      strcpy(newMsg, "ШАМПУНЬ");
-    }
-    else if (isCyrillic && typeStr == "PAUZA") {
-      strcpy(newMsg, "ПАУЗА");
-    }
-    else {
-      strncpy(newMsg, typeStr.c_str(), sizeof(newMsg) - 1);
-    }
+    const char *word = isCyrillic ? cyrillicWord(typeStr) : nullptr;
+    strncpy(newMsg, word ? word : typeStr.c_str(), sizeof(newMsg) - 1);
 
     newMsg[sizeof(newMsg) - 1] = '\0';
     formatTime(newValue, timeStr);
@@ -859,9 +1160,12 @@ void loop() {
   lastFrame = millis();
 
   disp.fillScreen(0);
-  drawBorderAnimation();
+  if (displayType != "PARKING") drawBorderAnimation();   // parkovkada ekran tinch turadi
 
-  if (displayType == "MECANUZ") {
+  if (displayType == "PARKING") {
+    drawParking();
+  }
+  else if (displayType == "MECANUZ") {
     animateMecanuz();
     drawLine(SLOT_SINGLE, message, textColor);
   }
@@ -876,6 +1180,12 @@ void loop() {
     const BahnFont &f = pairFont(message, currencyStr);
     drawLine(SLOT_TOP, message, valueColor, false, &f);
     drawLine(SLOT_BOTTOM, currencyStr, textColor, false, &f);
+  }
+  else if (displayType == "LINES") {
+    // Har bir qator o'zicha: o'z rangi, sig'masa o'zi alohida skroll qiladi
+    const BahnFont &f = pairFont(message, message2);
+    scrollStep(xPos,  drawLine(SLOT_TOP,    message,  textColor,  false, &f));
+    scrollStep(xPos2, drawLine(SLOT_BOTTOM, message2, valueColor, false, &f));
   }
   else if (displayType == "TEST") {
     // Ikki panelda alifbo ikkala panel o'rtasidan skroll qiladi
@@ -900,13 +1210,7 @@ void loop() {
     }
 
     // SKROLL MANTIQI: Uzun matnlar qotib qolmasligi uchun uzluksiz skroll boladi
-    if (w > PANEL_WIDTH) {
-      xPos--;
-      // Matn toliq chiqib ketgach, yana ong tarafdan kirib kelishni boshlaydi
-      if (xPos < -w) {
-        xPos = PANEL_WIDTH;
-      }
-    }
+    scrollStep(xPos, w);
   }
 
   disp.flipDMABuffer();
