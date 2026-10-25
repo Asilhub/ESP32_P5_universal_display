@@ -21,7 +21,7 @@ Ko'p tilli: lotin va kirill alifbolari (qirg'izcha `Ң Ө Ү` bilan), UTF-8 deko
 
 ![Parkovka rejimi, 64x64](docs/parkovka_64x64.png)
 
-**Versiya:** 1.1.0
+**Versiya:** 1.1.1
 **Kontroller:** ESP32 (original, 2016)
 
 > Faqat bitta 2121 panel uchun alohida, sinalgan va qotirilgan versiya: [ESP32_P5_2121_display](https://github.com/Asilhub/ESP32_P5_2121_display).
@@ -48,7 +48,7 @@ Ko'p tilli: lotin va kirill alifbolari (qirg'izcha `Ң Ө Ү` bilan), UTF-8 deko
 
 ## 1. Tezkor boshlash
 
-1. Firmware'ni ESP32 ga yuklang — tayyor `release/p5_carwash_v1.1.0_FULL.bin` → `0x0` ([11-bo'lim](#11-kompilyatsiya-va-yuklash)).
+1. Firmware'ni ESP32 ga yuklang — tayyor `release/p5_carwash_v1.1.1_FULL.bin` → `0x0` ([11-bo'lim](#11-kompilyatsiya-va-yuklash)).
 2. Panel(lar)ni ulang ([2-bo'lim](#2-apparat-va-ulanish)).
 3. Arduino IDE → **Serial Monitor**: tezlik **115200**, pastki o'ng burchakda **Newline**.
 4. Panel turini yuboring (bir marta):
@@ -339,7 +339,8 @@ Tepa panelda avtoraqam haqiqiy raqamga o'xshab chiziladi, pastki panelda to'lov 
 - **Ranglar:** raqam — 1-rang (standart oq), summa — 2-rang (standart yashil). Bayroq ranglari o'zgarmaydi.
 - **Bitta panelda (64x32):** yuqori yarmida raqam (bayroq bor, `UZ` harflari sig'maydi), pastki yarmida summa va valyuta bir qatorda.
 - Parkovka rejimida tepa/past animatsiya chizig'i o'chadi — ekran tinch turadi.
-- **Raqam ramkaga sig'masa** avval guruhlar orasi qisqaradi, keyin bayroq olib tashlanadi. Baribir sig'masa (masalan `40 M 777 MM` — juda keng harflar) yoki raqam 2 ta raqam bilan boshlanmasa (chet el raqami) — oddiy matn bo'lib chiqadi va kerak bo'lsa skroll qiladi.
+- **Raqam ramkaga sig'masa** avval guruhlar orasi qisqaradi, keyin bayroq olib tashlanadi.
+- **Davlat raqami aniqlanmasa** — raqam 2 ta raqam bilan boshlanmasa (chet el raqami, `AB 1234 CD`) yoki baribir sig'masa (`40 M 777 MM` — juda keng harflar) — ramka ichida **faqat raqamning o'zi** chiqadi: viloyat kodi, ajratuvchi chiziq va bayroqsiz. Sig'adigan eng katta shrift tanlanadi (15 → 12 px); hech biriga sig'masa ramka ichida skroll qiladi.
 
 ---
 
@@ -566,6 +567,11 @@ Yuridik shaxs raqami, `150 000 SO'M`.
 Qirg'iziston: KG bayroq, `500 СОМ`.
 
 ```json
+{"plate":"AB1234CD","sum":15000}
+```
+Aniqlanmagan (chet el) raqam: ramka ichida faqat `AB 1234 CD`, bayroqsiz.
+
+```json
 {"plate":"01A123BC","text":"XUSH KELIBSIZ"}
 ```
 Kirishda: summa o'rniga `XUSH KELIBSIZ` (skroll qiladi).
@@ -649,7 +655,7 @@ DMA o'lchami panellarga qarab: `16s` → 64x32, `8s` → 128x16, `16s,8s` → 19
 
 9. **Bahnschrift — Microsoft Windows shrifti.** `font_bahn.h` undan avtomatik yasalgan piksel nusxa. Tijorat maqsadida tarqatishdan oldin litsenziyani tekshiring; kerak bo'lsa `gen_bahn.py` da ochiq litsenziyali shriftga (masalan PT Sans Narrow) almashtirish mumkin.
 
-10. **Parkovka: juda keng raqamlar ramkaga sig'maydi.** Avtoraqam 12 px shriftda chiziladi; `M`, `W` va `4` ko'p bo'lsa (`40 M 777 MM`) 64 px ga sig'maydi va oddiy skroll qiluvchi matnga o'tadi.
+10. **Parkovka: juda keng raqamlar bayroqsiz chiqadi.** Avtoraqam 12 px shriftda chiziladi; `M`, `W` va `4` ko'p bo'lsa (`40 M 777 MM`) region/bayroqli ko'rinishga sig'maydi va ramka ichida faqat raqam bo'lib chiqadi.
 
 ---
 
@@ -659,9 +665,9 @@ DMA o'lchami panellarga qarab: `16s` → 64x32, `8s` → 128x16, `16s,8s` → 19
 
 Kompilyatsiya qilish shart emas. Fayllar [`release/`](release/) papkasida va [Releases](https://github.com/Asilhub/ESP32_P5_universal_display/releases) sahifasida.
 
-**Eng oson — bitta fayl:** `p5_carwash_v1.1.0_FULL.bin` → **`0x0`** manziliga.
+**Eng oson — bitta fayl:** `p5_carwash_v1.1.1_FULL.bin` → **`0x0`** manziliga.
 
-Brauzer orqali: Chrome'da [ESP Tool](https://espressif.github.io/esptool-js/) → **Connect** → COM port → Flash Address `0x0` → `p5_carwash_v1.1.0_FULL.bin` → **Program**.
+Brauzer orqali: Chrome'da [ESP Tool](https://espressif.github.io/esptool-js/) → **Connect** → COM port → Flash Address `0x0` → `p5_carwash_v1.1.1_FULL.bin` → **Program**.
 
 **4 ta alohida fayl bilan** ([`release/parts/`](release/parts/)):
 
@@ -684,7 +690,7 @@ flash.bat COM3
 **esptool:**
 
 ```bash
-esptool --chip esp32 -p COM3 -b 921600 write_flash 0x0 p5_carwash_v1.1.0_FULL.bin
+esptool --chip esp32 -p COM3 -b 921600 write_flash 0x0 p5_carwash_v1.1.1_FULL.bin
 ```
 
 > **Sozlamalar:** `FULL.bin` (0x0) xotirani to'liq qayta yozadi — `panels`, `level`, `brightness` o'chadi va standart `16s` ga qaytadi. Yozgandan keyin `{"panels":...}` ni qayta yuboring. 4 ta fayl usuli (va Arduino IDE Upload) sozlamalarni **saqlab qoladi**.
@@ -768,7 +774,7 @@ p5_carwash/
 │   ├── parkovka_64x64.png            Parkovka rejimi, ikki panel
 │   └── parkovka_64x32.png            Parkovka rejimi, bitta panel
 └── release/
-    ├── p5_carwash_v1.1.0_FULL.bin    Tayyor firmware (0x0 ga yoziladi)
+    ├── p5_carwash_v1.1.1_FULL.bin    Tayyor firmware (0x0 ga yoziladi)
     ├── flash.bat                     Windows uchun flash skripti
     └── parts/
         ├── bootloader.bin            0x1000

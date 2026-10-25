@@ -106,6 +106,8 @@ public:
   int16_t   height    = PANEL_HEIGHT;   // umumiy ekran balandligi: 32 yoki 64
   int16_t   dmaWidth  = 0;
   int16_t   dmaHeight = 0;
+  int16_t   clipX0    = 0;                // shu ustunlardan tashqariga chizilmaydi
+  int16_t   clipX1    = PANEL_WIDTH - 1;  // (ramka ichida skroll uchun)
 
   static int16_t scanWidth(uint8_t scan) { return scan == 8 ? PANEL_WIDTH * 2 : PANEL_WIDTH; }
 
@@ -141,7 +143,7 @@ public:
   }
 
   void drawPixel(int16_t x, int16_t y, uint16_t c) {
-    if (x < 0 || x >= PANEL_WIDTH || y < 0 || y >= height) return;
+    if (x < clipX0 || x > clipX1 || y < 0 || y >= height) return;
     const PanelSlot &p = panel[y / PANEL_HEIGHT];
     y %= PANEL_HEIGHT;
     if (p.flip) {
@@ -486,7 +488,8 @@ void scrollStep(int &pos, int w) {
 //   | 01 | A 123 BC  ▤ |    ▤ - bayroq, ostida U/Z (yoki K/G) 3x5 harflar
 // O'zbekiston: "01 A 123 BC" (jismoniy), "01 123 ABC" (yuridik). Qirg'iziston: "01 123 ABC".
 // Sig'masa avval guruhlar orasi qisqaradi, keyin bayroq olib tashlanadi;
-// baribir sig'masa (yoki raqam 2 ta raqamdan boshlanmasa) - oddiy matn bo'lib skroll qiladi.
+// baribir sig'masa (yoki raqam 2 ta raqamdan boshlanmasa) - ramka ichida faqat
+// raqamning o'zi (region, chiziq, bayroqsiz), sig'masa ramka ichida skroll qiladi.
 
 static const uint8_t MICRO_UZ[2][5] = { {5, 5, 5, 5, 7}, {7, 1, 2, 4, 7} };   // U Z
 static const uint8_t MICRO_KG[2][5] = { {5, 5, 6, 5, 5}, {7, 4, 5, 5, 7} };   // K G
@@ -514,6 +517,18 @@ void drawFlag(int16_t x, int16_t y) {
   }
 }
 
+// Ramka y0..y1 qatorlarda, burchaklari yumaloq
+void drawFrame(int16_t y0, int16_t y1, uint16_t color) {
+  for (int16_t x = 1; x < PANEL_WIDTH - 1; x++) {
+    disp.drawPixel(x, y0, color);
+    disp.drawPixel(x, y1, color);
+  }
+  for (int16_t y = y0 + 1; y < y1; y++) {
+    disp.drawPixel(0, y, color);
+    disp.drawPixel(PANEL_WIDTH - 1, y, color);
+  }
+}
+
 // Ramka y0..y1 qatorlarda. Chizib bo'lmasa false.
 bool drawPlate(int16_t y0, int16_t y1, uint16_t color) {
   if (!plateRegion[0] || !plateMain[0]) return false;
@@ -535,15 +550,7 @@ bool drawPlate(int16_t y0, int16_t y1, uint16_t color) {
   }
   if (!gap) return false;
 
-  // Ramka, burchaklari yumaloq
-  for (int16_t x = 1; x < PANEL_WIDTH - 1; x++) {
-    disp.drawPixel(x, y0, color);
-    disp.drawPixel(x, y1, color);
-  }
-  for (int16_t y = y0 + 1; y < y1; y++) {
-    disp.drawPixel(0, y, color);
-    disp.drawPixel(PANEL_WIDTH - 1, y, color);
-  }
+  drawFrame(y0, y1, color);
 
   int16_t inner = y1 - y0 - 1;
   int16_t ty = y0 + 1 + (inner - f.cap) / 2;
@@ -568,6 +575,39 @@ bool drawPlate(int16_t y0, int16_t y1, uint16_t color) {
     }
   }
   return true;
+}
+
+// Aniqlanmagan raqam: ramka ichida faqat message ("AB 1234 CD", "40 M 777 MM").
+// Sig'adigan eng katta shrift va guruhlar orasi tanlanadi; sig'masa ramka ichida skroll.
+void drawPlainPlate(int16_t y0, int16_t y1, uint16_t color) {
+  if (!message[0]) return;
+  drawFrame(y0, y1, color);
+
+  const int16_t left = 2, right = PANEL_WIDTH - 3;   // ramka + 1 px bo'shliq
+  const int16_t room = right - left + 1;
+  int16_t inner = y1 - y0 - 1;
+
+  static const BahnFont *const PLAIN_FONTS[] = { &bahn15, &bahn12 };
+  for (const BahnFont *f : PLAIN_FONTS) {
+    if (f->cap > inner - 2) continue;
+    for (int gap = 3; gap >= 1; gap--) {
+      int w = textWidth(*f, message, gap - 1);
+      if (w <= room) {
+        drawText(*f, left + (room - w) / 2, y0 + 1 + (inner - f->cap) / 2, message, color, gap - 1);
+        return;
+      }
+    }
+  }
+
+  // Hech biriga sig'madi - 12 px da ramka ichida chapga skroll qiladi
+  const BahnFont &f = bahn12;
+  int w = textWidth(f, message, 1);
+  disp.clipX0 = left;
+  disp.clipX1 = right;
+  drawText(f, left + xPos, y0 + 1 + (inner - f.cap) / 2, message, color, 1);
+  disp.clipX0 = 0;
+  disp.clipX1 = PANEL_WIDTH - 1;
+  if (--xPos < -w) xPos = room;
 }
 
 // 1500000 -> "1 500 000"
@@ -616,9 +656,8 @@ void drawAmount() {
 
 void drawParking() {
   bool two = disp.count > 1;
-  if (!drawPlate(two ? 4 : 0, two ? PANEL_HEIGHT - 5 : PANEL_HEIGHT / 2 - 1, textColor)) {
-    scrollStep(xPos, drawLine(SLOT_TOP, message, textColor));
-  }
+  int16_t y0 = two ? 4 : 0, y1 = two ? PANEL_HEIGHT - 5 : PANEL_HEIGHT / 2 - 1;
+  if (!drawPlate(y0, y1, textColor)) drawPlainPlate(y0, y1, textColor);
   if (message2[0]) {
     scrollStep(xPos2, drawLine(SLOT_BOTTOM, message2, valueColor));
   } else {
