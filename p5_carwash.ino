@@ -642,8 +642,8 @@ void drawAmount() {
     return;
   }
 
-  static const BahnFont *const SUM_FONTS[] = { &bahn20, &bahn15, &bahn12 };
-  const BahnFont *f = SUM_FONTS[2];
+  static const BahnFont *const SUM_FONTS[] = { &bahn15, &bahn12 };
+  const BahnFont *f = SUM_FONTS[1];
   for (const BahnFont *s : SUM_FONTS) {
     if (textWidth(*s, num, 3) <= PANEL_WIDTH - 2) { f = s; break; }
   }
