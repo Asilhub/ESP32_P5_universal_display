@@ -201,6 +201,7 @@ int   xPos2          = 0;         // pastki qator skrolli (LINES, PARKING)
 char  plateRegion[3] = "";        // "01" - viloyat kodi
 char  plateMain[24]  = "";        // "A 123 BC" - guruhlar orasida bo'sh joy
 bool  plateKG        = false;     // Qirg'iziston raqami: bayroq va KG, valyuta СОМ
+bool  plateFlag      = false;     // bayroq faqat plateuz / platekg kalitida
 long  parkSum        = 0;
 char  parkLabel[16]  = "";        // summa yonidagi valyuta: SO'M / СОМ
 unsigned long parkSince = 0;      // parkovka xabari o'zgargan vaqt (bitta panelda summa/matn navbati)
@@ -545,6 +546,7 @@ bool drawPlate(int16_t y0, int16_t y1, uint16_t color) {
   for (const auto &fit : FITS) {
     int w = textWidth(f, plateMain, fit.gap - 1);
     // ramka+bo'shliq, region, bo'shliq+chiziq+bo'shliq, asosiy, bo'shliq, bayroq+bo'shliq, ramka
+    if (fit.flag && !plateFlag) continue;
     if (2 + rw + 3 + w + 1 + (fit.flag ? 4 : 0) + 1 <= PANEL_WIDTH) {
       gap = fit.gap; flag = fit.flag; mw = w;
       break;
@@ -984,8 +986,11 @@ bool plateMatches(const char *s, const char *pattern) {
 }
 
 void showParking(JsonDocument &doc) {
+  // plate - bayroqsiz; plateuz - UZ bayroq; platekg - KG bayroq, valyuta СОМ
   plateKG = doc["platekg"].is<const char*>();
-  const char *raw = plateKG ? doc["platekg"] : doc["plate"];
+  bool uz = !plateKG && doc["plateuz"].is<const char*>();
+  plateFlag = plateKG || uz;
+  const char *raw = plateKG ? doc["platekg"] : uz ? doc["plateuz"] : doc["plate"];
 
   // Faqat harf va raqamlar, katta harf bilan: "01 a-123 bc" -> "01A123BC"
   char clean[16];
@@ -1094,7 +1099,7 @@ void parseJSON(String jsonStr) {
     saveBrightness(doc["brightness"]);
     return;
   }
-  if (doc["plate"].is<const char*>() || doc["platekg"].is<const char*>()) {
+  if (doc["plate"].is<const char*>() || doc["plateuz"].is<const char*>() || doc["platekg"].is<const char*>()) {
     showParking(doc);
     return;
   }
