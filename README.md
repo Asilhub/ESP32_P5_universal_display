@@ -17,11 +17,11 @@ Ko'p tilli: lotin va kirill alifbolari (qirg'izcha `Ң Ө Ү` bilan), UTF-8 deko
 
 ![64x64 dizayn: eski va yangi shrift](docs/dizayn_64x64.png)
 
-**Parkovka rejimi:** tepada avtoraqam (ramka, viloyat kodi, bayroq — haqiqiy raqamga o'xshab), pastda to'lov summasi — `{"plate":"01A123BC","sum":15000}`. [Batafsil](#parkovka-rejimi).
+**Parkovka rejimi:** tepada avtoraqam (ramka, viloyat kodi, bayroq — haqiqiy raqamga o'xshab), pastda to'lov summasi va valyuta bir qatorda, ostida kirish/chiqish yozuvi — `{"plate":"01A123BC","sum":15000,"text":"OQ YO'L"}`. [Batafsil](#parkovka-rejimi).
 
 ![Parkovka rejimi, 64x64](docs/parkovka_64x64.png)
 
-**Versiya:** 1.1.2
+**Versiya:** 1.2.0
 **Kontroller:** ESP32 (original, 2016)
 
 > Faqat bitta 2121 panel uchun alohida, sinalgan va qotirilgan versiya: [ESP32_P5_2121_display](https://github.com/Asilhub/ESP32_P5_2121_display).
@@ -48,7 +48,7 @@ Ko'p tilli: lotin va kirill alifbolari (qirg'izcha `Ң Ө Ү` bilan), UTF-8 deko
 
 ## 1. Tezkor boshlash
 
-1. Firmware'ni ESP32 ga yuklang — tayyor `release/p5_carwash_v1.1.2_FULL.bin` → `0x0` ([11-bo'lim](#11-kompilyatsiya-va-yuklash)).
+1. Firmware'ni ESP32 ga yuklang — tayyor `release/p5_carwash_v1.2.0_FULL.bin` → `0x0` ([11-bo'lim](#11-kompilyatsiya-va-yuklash)).
 2. Panel(lar)ni ulang ([2-bo'lim](#2-apparat-va-ulanish)).
 3. Arduino IDE → **Serial Monitor**: tezlik **115200**, pastki o'ng burchakda **Newline**.
 4. Panel turini yuboring (bir marta):
@@ -236,11 +236,12 @@ Serial port, **115200 baud**, har bir buyruq `\n` (yangi qator) bilan tugaydi. B
 | `topkg` / `topkr`, `bottomkg` / `bottomkr` | matn | Xuddi shunday, kirill rejimi |
 | `plate` / `platekg` | matn | Parkovka: avtoraqam (O'zbekiston / Qirg'iziston) — [pastga qarang](#parkovka-rejimi) |
 | `sum` | son | Parkovka: to'lov summasi, **qo'shtirnoqsiz** |
-| `text` | matn | Parkovka: summa o'rniga pastda chiqadigan matn |
-| `currency` | matn | Parkovka: summa ostidagi yozuv (standart `SO'M` / `СОМ`) |
+| `text` | matn | Parkovka: kirish/chiqish yozuvi — summa bilan birga uning **ostida**, summasiz o'zi katta chiqadi |
+| `currency` | matn | Parkovka: summa yonidagi yozuv (standart `SO'M` / `СОМ`) |
 | `value` | son | Balans yoki vaqt — **MMSS formatida**, pastdagi izohga qarang |
 | `colorR1` `colorG1` `colorB1` | 0–255 | Matn rangi (1-rang) |
 | `colorR2` `colorG2` `colorB2` | 0–255 | Vaqt / raqam rangi (2-rang) |
+| `colorR3` `colorG3` `colorB3` | 0–255 | Parkovka: `text` rangi (3-rang); yuborilmasa 2-rang bilan bir xil |
 | `panels`, `input` | matn | Panel sozlamasi — [3-bo'lim](#3-panel-sozlamasi) |
 | `level` | matn | Panel yorqinligi — [4-bo'lim](#4-yorqinlik) |
 | `brightness` | son | Umumiy yorqinlik — [4-bo'lim](#4-yorqinlik) |
@@ -275,7 +276,7 @@ Ya'ni 2 daqiqa 30 soniya uchun `230` yuboriladi, `150` emas. Soniya qismi 59 dan
 | `TEST` | Sinov | Butun alifbo va raqamlar skroll qiladi |
 | boshqa har qanday matn | Matn + vaqt | Matn + `MM:SS` |
 | `top` / `bottom` kalitlari | Ikki qator | Tepada `top`, pastda `bottom` — har biri alohida |
-| `plate` / `platekg` kaliti | Parkovka | Tepada avtoraqam, pastda summa |
+| `plate` / `platekg` kaliti | Parkovka | Tepada avtoraqam, pastda summa va/yoki `text` |
 
 **Ranglar rejimga qarab:**
 
@@ -283,7 +284,7 @@ Ya'ni 2 daqiqa 30 soniya uchun `230` yuboriladi, `150` emas. Soniya qismi 59 dan
 | :--- | :--- | :--- |
 | Matn + vaqt | matn | vaqt |
 | Ikki qator (`top`/`bottom`) | tepa qator | pastki qator |
-| Parkovka | avtoraqam (standart oq) | summa yoki `text` (standart **yashil**) |
+| Parkovka | avtoraqam (standart oq) | summa (standart **yashil**); `text` ham, agar 3-rang (`colorR3/G3/B3`) yuborilmasa |
 | Valyuta | valyuta nomi | raqam |
 | `SUM` | — | raqam |
 | `MECANUZ`, `ERROR` | e'tiborga olinmaydi | e'tiborga olinmaydi |
@@ -315,18 +316,26 @@ Ya'ni 2 daqiqa 30 soniya uchun `230` yuboriladi, `150` emas. Soniya qismi 59 dan
 ### Parkovka rejimi
 
 ```json
-{"plate":"01A123BC","sum":15000}
+{"plate":"01A123BC","sum":15000,"text":"OQ YO'L"}
 ```
 
-Tepa panelda avtoraqam haqiqiy raqamga o'xshab chiziladi, pastki panelda to'lov summasi:
+Tepa panelda avtoraqam haqiqiy raqamga o'xshab chiziladi, pastki panelda to'lov summasi va valyuta bir qatorda, ostida — kirish/chiqish yozuvi:
 
 ```
 ┌──┬─────────────┬─┐
 │01│ A 123 BC   ▤│      ▤ — bayroq, ostida U/Z (Qirg'iziston: K/G)
 └──┴─────────────┴─┘
-     15 000              katta yashil raqam (24→20→15 px, sig'adiganiga qarab)
-      SO'M
+   15 000 SO'M           yashil raqam (15 px, sig'masa 12 px), yonida valyuta (7 px)
+     OQ YO'L             text — 12 px, sig'masa skroll qiladi
 ```
+
+Pastki panelda nima chiqishi `sum` va `text` ga bog'liq:
+
+| Yuborilgan | Pastki panelda | Qachon |
+| :--- | :--- | :--- |
+| faqat `sum` | summa va valyuta bir qatorda, o'rtada | to'lov |
+| faqat `text` (`sum` yo'q yoki `0`) | katta matn (24→20→15 px), sig'masa skroll qiladi | kirishda: `XUSH KELIBSIZ`; bepul chiqish: `BEPUL` |
+| `sum` va `text` | summa tepada, matn ostida | chiqishda: summa + `OQ YO'L`, yoki kirgan-chiqqan vaqti `14:05-16:20` |
 
 ![Parkovka rejimi, 64x32](docs/parkovka_64x32.png)
 
@@ -334,10 +343,11 @@ Tepa panelda avtoraqam haqiqiy raqamga o'xshab chiziladi, pastki panelda to'lov 
 - **O'zbekiston** (`plate`): jismoniy `01 A 123 BC`, yuridik `01 123 ABC`. Bayroq ko'k/oq/yashil, ostida `UZ`, valyuta `SO'M`.
 - **Qirg'iziston** (`platekg`): `01 123 ABC`. Bayroq qizil, sariq quyosh bilan, ostida `KG`, valyuta `СОМ`.
 - **Summa** minglarga bo'linadi: `1500000` → `1 500 000`. Katta summa avtomatik kichikroq shriftga o'tadi. `sum` qo'shtirnoqsiz son bo'lishi kerak.
-- **`text`** berilsa summa o'rniga shu matn chiqadi (sig'masa skroll qiladi): kirishda `XUSH KELIBSIZ`, `BEPUL` va h.k.
-- **`currency`** summa ostidagi yozuvni almashtiradi: `"currency":"USD"`.
-- **Ranglar:** raqam — 1-rang (standart oq), summa — 2-rang (standart yashil). Bayroq ranglari o'zgarmaydi.
-- **Bitta panelda (64x32):** yuqori yarmida raqam (bayroq bor, `UZ` harflari sig'maydi), pastki yarmida summa va valyuta bir qatorda.
+- **Valyuta** summa bilan bir qatorda, uning o'ng tomonida turadi (v1.2.0 gacha summa ostida edi). Juda katta summa (`12 500 000`) valyuta bilan sig'masa — valyutasiz chiqadi.
+- **`text`** — mashina kirganda yoki chiqayotganda chiqadigan yozuv. Summa bilan birga yuborilsa summa **ostida** (12 px) chiqadi, summasiz (yoki `"sum":0`) — o'zi katta bo'lib chiqadi. 64 px ga sig'masa skroll qiladi. `14:05-16:20` kabi vaqt ham yozish mumkin (`:` va `-` bor).
+- **`currency`** summa yonidagi yozuvni almashtiradi: `"currency":"USD"`.
+- **Ranglar:** raqam — 1-rang (standart oq), summa — 2-rang (standart yashil), `text` — 3-rang (`colorR3/G3/B3`; yuborilmasa 2-rang bilan bir xil). Bayroq ranglari o'zgarmaydi.
+- **Bitta panelda (64x32):** yuqori yarmida raqam (bayroq bor, `UZ` harflari sig'maydi), pastki yarmida summa va valyuta bir qatorda. `sum` va `text` birga yuborilsa pastki yarmida **navbat bilan** chiqadi: 2,5 soniya summa, keyin matn (sig'maydigan matn o'ngdan kirib, to'liq o'tib ketguncha).
 - Parkovka rejimida tepa/past animatsiya chizig'i o'chadi — ekran tinch turadi.
 - **Raqam ramkaga sig'masa** avval guruhlar orasi qisqaradi, keyin bayroq olib tashlanadi.
 - **Davlat raqami aniqlanmasa** — raqam 2 ta raqam bilan boshlanmasa (chet el raqami, `AB 1234 CD`) yoki baribir sig'masa (`40 M 777 MM` — juda keng harflar) — ramka ichida **faqat raqamning o'zi** chiqadi: viloyat kodi, ajratuvchi chiziq va bayroqsiz. Sig'adigan eng katta shrift tanlanadi (15 → 12 px); hech biriga sig'masa ramka ichida skroll qiladi.
@@ -554,7 +564,22 @@ Kirill: `ШАМПУНЬ` + `КОПИК`.
 ```json
 {"plate":"01A123BC","sum":15000}
 ```
-Tepada `01 | A 123 BC` + UZ bayroq, pastda yashil `15 000`, ostida `SO'M`.
+Tepada `01 | A 123 BC` + UZ bayroq, pastda yashil `15 000`, yonida `SO'M`.
+
+```json
+{"plate":"01A123BC","sum":15000,"text":"OQ YO'L"}
+```
+Chiqishda: `15 000 SO'M`, ostida `OQ YO'L`.
+
+```json
+{"plate":"10 123 ABC","sum":150000,"text":"14:05-16:20"}
+```
+Summa ostida kirgan va chiqqan vaqti.
+
+```json
+{"platekg":"01123ABC","sum":500,"text":"АК ЖОЛ"}
+```
+Qirg'iziston: `500 СОМ`, ostida `АК ЖОЛ`.
 
 ```json
 {"plate":"10 123 ABC","sum":150000}
@@ -574,17 +599,22 @@ Aniqlanmagan (chet el) raqam: ramka ichida faqat `AB 1234 CD`, bayroqsiz.
 ```json
 {"plate":"01A123BC","text":"XUSH KELIBSIZ"}
 ```
-Kirishda: summa o'rniga `XUSH KELIBSIZ` (skroll qiladi).
+Kirishda: summasiz, pastki panelda katta `XUSH KELIBSIZ` (skroll qiladi).
 
 ```json
 {"plate":"01A123BC","sum":0,"text":"BEPUL"}
 ```
-Bepul chiqish.
+Bepul chiqish: summa `0` — faqat katta `BEPUL`.
 
 ```json
 {"plate":"01A123BC","sum":25,"currency":"USD","colorR2":255,"colorG2":200,"colorB2":0}
 ```
-Summa sariq, ostida `USD`.
+Summa sariq, yonida `USD`.
+
+```json
+{"plate":"01A123BC","sum":15000,"text":"KUTING","colorR3":255,"colorG3":0,"colorB3":0}
+```
+Summa yashil, ostidagi `KUTING` qizil (3-rang).
 
 ### Sinov
 
@@ -655,7 +685,9 @@ DMA o'lchami panellarga qarab: `16s` → 64x32, `8s` → 128x16, `16s,8s` → 19
 
 9. **Bahnschrift — Microsoft Windows shrifti.** `font_bahn.h` undan avtomatik yasalgan piksel nusxa. Tijorat maqsadida tarqatishdan oldin litsenziyani tekshiring; kerak bo'lsa `gen_bahn.py` da ochiq litsenziyali shriftga (masalan PT Sans Narrow) almashtirish mumkin.
 
-10. **Parkovka: juda keng raqamlar bayroqsiz chiqadi.** Avtoraqam 12 px shriftda chiziladi; `M`, `W` va `4` ko'p bo'lsa (`40 M 777 MM`) region/bayroqli ko'rinishga sig'maydi va ramka ichida faqat raqam bo'lib chiqadi.
+10. **Parkovka: summa ostidagi matnda kirill dumlari qisqa.** Summa (15 px) va matn (12 px) pastki panelning 32 qatorini deyarli to'ldiradi: `Ц`, `Щ`, `Ң` dumining faqat 1 px i ko'rinadi, `Й` belgisi summaga tegib turadi.
+
+11. **Parkovka: juda keng raqamlar bayroqsiz chiqadi.** Avtoraqam 12 px shriftda chiziladi; `M`, `W` va `4` ko'p bo'lsa (`40 M 777 MM`) region/bayroqli ko'rinishga sig'maydi va ramka ichida faqat raqam bo'lib chiqadi.
 
 ---
 
@@ -665,9 +697,9 @@ DMA o'lchami panellarga qarab: `16s` → 64x32, `8s` → 128x16, `16s,8s` → 19
 
 Kompilyatsiya qilish shart emas. Fayllar [`release/`](release/) papkasida va [Releases](https://github.com/Asilhub/ESP32_P5_universal_display/releases) sahifasida.
 
-**Eng oson — bitta fayl:** `p5_carwash_v1.1.2_FULL.bin` → **`0x0`** manziliga.
+**Eng oson — bitta fayl:** `p5_carwash_v1.2.0_FULL.bin` → **`0x0`** manziliga.
 
-Brauzer orqali: Chrome'da [ESP Tool](https://espressif.github.io/esptool-js/) → **Connect** → COM port → Flash Address `0x0` → `p5_carwash_v1.1.2_FULL.bin` → **Program**.
+Brauzer orqali: Chrome'da [ESP Tool](https://espressif.github.io/esptool-js/) → **Connect** → COM port → Flash Address `0x0` → `p5_carwash_v1.2.0_FULL.bin` → **Program**.
 
 **4 ta alohida fayl bilan** ([`release/parts/`](release/parts/)):
 
@@ -690,7 +722,7 @@ flash.bat COM3
 **esptool:**
 
 ```bash
-esptool --chip esp32 -p COM3 -b 921600 write_flash 0x0 p5_carwash_v1.1.2_FULL.bin
+esptool --chip esp32 -p COM3 -b 921600 write_flash 0x0 p5_carwash_v1.2.0_FULL.bin
 ```
 
 > **Sozlamalar:** `FULL.bin` (0x0) xotirani to'liq qayta yozadi — `panels`, `level`, `brightness` o'chadi va standart `16s` ga qaytadi. Yozgandan keyin `{"panels":...}` ni qayta yuboring. 4 ta fayl usuli (va Arduino IDE Upload) sozlamalarni **saqlab qoladi**.
@@ -723,7 +755,7 @@ pip install pillow
 python gen_bahn.py
 ```
 
-O'lchamlar (`24, 20, 15, 12, 7`) va belgilar ro'yxati (`CHARS`) skript ichida. 12 va 7 px — parkovka rejimi uchun (avtoraqam, `SO'M` yozuvi).
+O'lchamlar (`24, 20, 15, 12, 7`) va belgilar ro'yxati (`CHARS`) skript ichida. 12 va 7 px — parkovka rejimi uchun (12 px — avtoraqam va summa ostidagi matn, 7 px — `SO'M` yozuvi).
 
 ---
 
@@ -757,6 +789,7 @@ HUB75 kutubxonasi butun zanjirni **bitta uzun gorizontal panel** deb ko'radi. `S
 | Bitta 8S (`8s`) | — (alohida [ESP32_P5_display](https://github.com/Asilhub/ESP32_P5_display) sinalgan) |
 | Ikkita bir xil panel, `flip` | — |
 | Parkovka rejimi (`8s,8s` + `flip:bottom`) | ✅ |
+| Parkovka: valyuta summa yonida, `text` summa ostida (v1.2.0) | — |
 
 ---
 
@@ -774,7 +807,7 @@ p5_carwash/
 │   ├── parkovka_64x64.png            Parkovka rejimi, ikki panel
 │   └── parkovka_64x32.png            Parkovka rejimi, bitta panel
 └── release/
-    ├── p5_carwash_v1.1.2_FULL.bin    Tayyor firmware (0x0 ga yoziladi)
+    ├── p5_carwash_v1.2.0_FULL.bin    Tayyor firmware (0x0 ga yoziladi)
     ├── flash.bat                     Windows uchun flash skripti
     └── parts/
         ├── bootloader.bin            0x1000

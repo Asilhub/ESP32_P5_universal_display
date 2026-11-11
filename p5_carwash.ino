@@ -197,15 +197,17 @@ int   value          = 0;
 int   xPos           = 0;
 int   xPos2          = 0;         // pastki qator skrolli (LINES, PARKING)
 
-// PARKING rejimi: tepada avtoraqam, pastda summa (yoki message2 dagi matn)
+// PARKING rejimi: tepada avtoraqam, pastda summa va/yoki message2 dagi matn
 char  plateRegion[3] = "";        // "01" - viloyat kodi
 char  plateMain[24]  = "";        // "A 123 BC" - guruhlar orasida bo'sh joy
 bool  plateKG        = false;     // Qirg'iziston raqami: bayroq va KG, valyuta СОМ
 long  parkSum        = 0;
-char  parkLabel[16]  = "";        // summa ostidagi valyuta: SO'M / СОМ
+char  parkLabel[16]  = "";        // summa yonidagi valyuta: SO'M / СОМ
+unsigned long parkSince = 0;      // parkovka xabari o'zgargan vaqt (bitta panelda summa/matn navbati)
 
 uint16_t textColor   = 0xFFFF;
 uint16_t valueColor  = 0xFFFF;
+uint16_t infoColor   = 0xFFFF;    // parkovka matni (3-rang; yuborilmasa 2-rang bilan bir xil)
 String   displayType = "MECANUZ";
 bool     isCyrillic  = false;
 
@@ -623,45 +625,84 @@ void formatAmount(long v, char *out, size_t size) {
   out[j] = '\0';
 }
 
-// Ikki panel: pastki panelda katta summa, ostida valyuta.
-// Bitta panel: pastki yarmida summa va valyuta bir qatorda.
-void drawAmount() {
+#define PARK_TEXT_GAP  4        // summa va ostidagi matn orasi, px
+#define PARK_SWAP_MS   2500     // bitta panelda summa / matn navbati
+
+// Summa va valyuta bir qatorda: "15 000 SO'M". Raqam valyuta bilan birga sig'adigan
+// eng katta shriftda (ikki panelda 15 -> 12 px, bitta panelda 12 px); hech biriga
+// sig'masa - 12 px da valyutasiz. Qator top dan boshlab height px joyda vertikal
+// o'rtalanadi; below - ostidagi qator uchun qoldiriladigan joy.
+// Raqamning pastki chizig'idan keyingi qatorni qaytaradi.
+int16_t drawAmount(int16_t top, int16_t height, int16_t below = 0) {
+  static const BahnFont *const SUM_FONTS[] = { &bahn15, &bahn12 };
   char num[20];
   formatAmount(parkSum, num, sizeof(num));
   const BahnFont &lf = bahn7;
   int lw = textWidth(lf, parkLabel);
-  uint16_t labelColor = disp.color444(12, 12, 12);
 
-  if (disp.count == 1) {
-    const BahnFont &f = bahn12;
-    int w = textWidth(f, num, 2);
-    bool label = w + 3 + lw <= PANEL_WIDTH;
-    int16_t x = (PANEL_WIDTH - (label ? w + 3 + lw : w)) / 2;
-    drawText(f, x, 18, num, valueColor, 2);
-    if (label) drawText(lf, x + w + 3, 18 + f.cap - lf.cap, parkLabel, labelColor);
-    return;
+  const BahnFont *f = nullptr;
+  int space = 3, w = 0;
+  for (uint8_t i = (disp.count > 1) ? 0 : 1; i < 2 && !f; i++) {
+    for (space = 3; space >= 2; space--) {
+      w = textWidth(*SUM_FONTS[i], num, space);
+      if (w + 3 + lw <= PANEL_WIDTH) { f = SUM_FONTS[i]; break; }
+    }
+  }
+  bool label = f != nullptr;
+  if (!label) {
+    f = &bahn12;
+    for (space = 3; space > 1 && textWidth(*f, num, space) > PANEL_WIDTH; space--) {}
+    w = textWidth(*f, num, space);
   }
 
-  static const BahnFont *const SUM_FONTS[] = { &bahn15, &bahn12 };
-  const BahnFont *f = SUM_FONTS[1];
-  for (const BahnFont *s : SUM_FONTS) {
-    if (textWidth(*s, num, 3) <= PANEL_WIDTH - 2) { f = s; break; }
-  }
-  int w = textWidth(*f, num, 3);
-  int16_t h = f->cap + 3 + lf.cap;
-  int16_t y = PANEL_HEIGHT + 1 + (PANEL_HEIGHT - 1 - h) / 2;
-  drawText(*f, (PANEL_WIDTH - w) / 2, y, num, valueColor, 3);
-  drawText(lf, (PANEL_WIDTH - lw) / 2, y + f->cap + 3, parkLabel, labelColor);
+  int16_t y = top + (height - f->cap - below) / 2;
+  int16_t x = (PANEL_WIDTH - (label ? w + 3 + lw : w)) / 2;
+  drawText(*f, x, y, num, valueColor, space);
+  if (label) drawText(lf, x + w + 3, y + f->cap - lf.cap, parkLabel, disp.color444(12, 12, 12));
+  return y + f->cap;
 }
 
+// Tepada avtoraqam. Pastda:
+//   faqat summa          - summa va valyuta bir qatorda, o'rtada
+//   faqat matn (summa 0) - katta matn, sig'masa skroll qiladi (kirishda: XUSH KELIBSIZ)
+//   summa va matn        - ikki panelda summa tepada, matn ostida (chiqishda: OQ YO'L);
+//                          bitta panelda ikkalasi navbat bilan
 void drawParking() {
   bool two = disp.count > 1;
   int16_t y0 = two ? 4 : 0, y1 = two ? PANEL_HEIGHT - 5 : PANEL_HEIGHT / 2 - 1;
   if (!drawPlate(y0, y1, textColor)) drawPlainPlate(y0, y1, textColor);
-  if (message2[0]) {
-    scrollStep(xPos2, drawLine(SLOT_BOTTOM, message2, valueColor));
+
+  int16_t top = two ? PANEL_HEIGHT : PANEL_HEIGHT / 2, height = disp.height - top;
+  if (!message2[0]) {
+    drawAmount(top, height);
+    return;
+  }
+  if (parkSum == 0) {
+    scrollStep(xPos2, drawLine(SLOT_BOTTOM, message2, infoColor));
+    return;
+  }
+
+  if (two) {
+    // Matn 12 px da (7 px da raqamlar o'qilmaydi); sig'masa skroll qiladi
+    const BahnFont &f = bahn12;
+    int w = textWidth(f, message2);
+    int16_t y = drawAmount(top, height, PARK_TEXT_GAP + f.cap) + PARK_TEXT_GAP;
+    drawText(f, (w > PANEL_WIDTH) ? xPos2 : (PANEL_WIDTH - w) / 2, y, message2, infoColor);
+    scrollStep(xPos2, w);
+    return;
+  }
+
+  // Bitta panel: avval summa, keyin matn. Sig'maydigan matn o'ngdan kirib,
+  // to'liq o'tib ketguncha ko'rsatiladi.
+  int w = textWidth16(message2);
+  bool scroll = w > PANEL_WIDTH;
+  unsigned long textMs = scroll ? (unsigned long)(w + PANEL_WIDTH) * FRAME_MS : PARK_SWAP_MS;
+  unsigned long t = (millis() - parkSince) % (PARK_SWAP_MS + textMs);
+  if (t < PARK_SWAP_MS) {
+    drawAmount(top, height);
   } else {
-    drawAmount();
+    if (scroll) xPos2 = PANEL_WIDTH - (int)((t - PARK_SWAP_MS) / FRAME_MS);
+    drawLine(SLOT_BOTTOM, message2, infoColor);
   }
 }
 
@@ -927,9 +968,11 @@ void showLines(JsonDocument &doc) {
   }
 }
 
-// {"plate":"01A123BC","sum":15000} - parkovka: tepada avtoraqam, pastda summa.
-// "platekg" - Qirg'iziston raqami. "text" berilsa summa o'rniga shu matn chiqadi,
-// "currency" - summa ostidagi yozuv (standart SO'M / СОМ).
+// {"plate":"01A123BC","sum":15000,"text":"OQ YO'L"} - parkovka: tepada avtoraqam,
+// pastda summa, ostida matn. "platekg" - Qirg'iziston raqami. "text" - kirish/chiqish
+// yozuvi: summa bilan birga uning ostida, summasiz (yoki summa 0) - o'zi katta chiqadi.
+// "currency" - summa yonidagi yozuv (standart SO'M / СОМ).
+// colorR3/G3/B3 - matn rangi (yuborilmasa 2-rang).
 void showParking(JsonDocument &doc) {
   plateKG = doc["platekg"].is<const char*>();
   const char *raw = plateKG ? doc["platekg"] : doc["plate"];
@@ -967,7 +1010,16 @@ void showParking(JsonDocument &doc) {
   String label = doc["currency"] | (plateKG ? "СОМ" : "SO'M");
   label.toUpperCase();
 
-  parkSum = doc["sum"] | 0L;
+  long sum = doc["sum"] | 0L;
+
+  // Xabar o'zgarsa (yangi mashina) bitta paneldagi navbat summadan boshlanadi;
+  // o'sha xabar qayta yuborilsa navbat uzilmaydi
+  if (displayType != "PARKING" || sum != parkSum ||
+      strcmp(message, plain) != 0 || strcmp(message2, text.c_str()) != 0) {
+    parkSince = millis();
+  }
+
+  parkSum = sum;
   strncpy(parkLabel, label.c_str(), sizeof(parkLabel) - 1);
   parkLabel[sizeof(parkLabel) - 1] = '\0';
 
@@ -977,10 +1029,14 @@ void showParking(JsonDocument &doc) {
   int r2 = doc["colorR2"] | 0;       // summa standart - yashil
   int g2 = doc["colorG2"] | 255;
   int b2 = doc["colorB2"] | 80;
+  int r3 = doc["colorR3"] | r2;      // matn standart - summa rangida
+  int g3 = doc["colorG3"] | g2;
+  int b3 = doc["colorB3"] | b2;
 
   isCyrillic     = false;            // raqamdagi lotin harflar kirillga o'girilmasin
   textColor      = disp.color444(r1 / 17, g1 / 17, b1 / 17);
   valueColor     = disp.color444(r2 / 17, g2 / 17, b2 / 17);
+  infoColor      = disp.color444(r3 / 17, g3 / 17, b3 / 17);
   displayType    = "PARKING";
   valueZeroSince = 0;
 
