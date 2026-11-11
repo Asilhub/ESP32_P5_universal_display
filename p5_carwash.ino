@@ -973,6 +973,16 @@ void showLines(JsonDocument &doc) {
 // yozuvi: summa bilan birga uning ostida, summasiz (yoki summa 0) - o'zi katta chiqadi.
 // "currency" - summa yonidagi yozuv (standart SO'M / СОМ).
 // colorR3/G3/B3 - matn rangi (yuborilmasa 2-rang).
+// s andozaga to'liq mos keladimi: D - raqam, L - lotin harf
+bool plateMatches(const char *s, const char *pattern) {
+  for (; *pattern; s++, pattern++) {
+    if (!*s) return false;
+    bool digit = isdigit((unsigned char)*s);
+    if (*pattern == 'D' ? !digit : !(isalpha((unsigned char)*s))) return false;
+  }
+  return *s == '\0';
+}
+
 void showParking(JsonDocument &doc) {
   plateKG = doc["platekg"].is<const char*>();
   const char *raw = plateKG ? doc["platekg"] : doc["plate"];
@@ -985,8 +995,11 @@ void showParking(JsonDocument &doc) {
   }
   clean[n] = '\0';
 
-  // Viloyat kodi - boshidagi 2 ta raqam; qolgani harf/raqam guruhlariga bo'linadi
-  bool region = n > 2 && isdigit((unsigned char)clean[0]) && isdigit((unsigned char)clean[1]);
+  // Viloyat kodi (va bayroq) faqat haqiqiy formatda: O'zbekiston "01A123BC" /
+  // "01123ABC", Qirg'iziston "01123ABC". Boshqa har qanday raqam (chet el, xato
+  // o'qilgan) - aniqlanmagan: ramka ichida faqat raqamning o'zi, bayroqsiz.
+  // Qolgan qismi harf/raqam guruhlariga bo'linadi.
+  bool region = plateMatches(clean, "DDDDDLLL") || (!plateKG && plateMatches(clean, "DDLDDDLL"));
   plateRegion[0] = '\0';
   if (region) {
     memcpy(plateRegion, clean, 2);
